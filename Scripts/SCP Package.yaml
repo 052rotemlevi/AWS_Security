@@ -1,0 +1,354 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Comprehensive SCP Package with full customization options for deployment.
+
+Parameters:
+  AllowedRegions:
+    Description: >-
+      Enter the allowed regions as a JSON array string. For example:["us-east-1", "us-west-1", "eu-west-3"].
+    Type: String
+    Default: '["us-east-1", "us-west-1"]'
+
+  BypassRoleARN:
+    Description: Optional ARN of the IAM role to bypass SCP restrictions. Leave empty if not used.
+    Type: String
+    Default: ""
+
+  EnableRegionRestriction:
+    Description: Enable SCP to restrict access based on requested region.
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+
+  EnableCloudTrailProtection:
+    Description: Enable SCP to protect CloudTrail logging.
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+
+  EnableRootAccountRestriction:
+    Description: Enable SCP to restrict the root user account.
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+
+  EnableAccessAnalyzerProtection:
+    Description: Enable SCP to protect AWS Access Analyzer from deletion.
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+
+  EnableEbsDefaultEncryption:
+    Description: Enable SCP to enforce EBS default encryption.
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+
+  EnableS3EncryptionEnforcement:
+    Description: Enable SCP to enforce encryption for S3 buckets.
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+
+  EnableLockInternetAccessInVPCs:
+    Description: Enable SCP to restrict the creation of internet gateways in VPCs.
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+
+  EnableNoNewIAMUsersOrAccessKeys:
+    Description: Enable SCP to prevent the creation of new IAM users or access keys.
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+
+
+Conditions:
+  CreateRegionRestriction: !Equals [ !Ref EnableRegionRestriction, "true" ]
+  CreateCloudTrailProtection: !Equals [ !Ref EnableCloudTrailProtection, "true" ]
+  CreateRootAccountRestriction: !Equals [ !Ref EnableRootAccountRestriction, "true" ]
+  CreateAccessAnalyzerProtection: !Equals [ !Ref EnableAccessAnalyzerProtection, "true" ]
+  CreateEbsDefaultEncryption: !Equals [ !Ref EnableEbsDefaultEncryption, "true" ]
+  CreateS3EncryptionEnforcement: !Equals [ !Ref EnableS3EncryptionEnforcement, "true" ]
+  CreateLockInternetAccessInVPCs: !Equals [ !Ref EnableLockInternetAccessInVPCs, "true" ]
+  CreateNoNewIAMUsersOrAccessKeys: !Equals [ !Ref EnableNoNewIAMUsersOrAccessKeys, "true" ]
+
+
+
+Resources:
+  # Regions Protection SCPs
+  RestrictAccessToAWSBasedOnRequestedRegion:
+    Type: 'AWS::Organizations::Policy'
+    Condition: CreateRegionRestriction
+    Properties:
+      Name: RestrictAccessToAWSBasedOnRequestedRegion
+      Description: "Restrict access to AWS services based on the requested region, with an optional bypass role."
+      Type: "SERVICE_CONTROL_POLICY"
+      Content: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "NotAction": [
+                "a4b:*",
+                "acm:*",
+                "aws-marketplace-management:*",
+                "aws-marketplace:*",
+                "aws-portal:*",
+                "awsbillingconsole:*",
+                "budgets:*",
+                "ce:*",
+                "chime:*",
+                "cloudfront:*",
+                "config:*",
+                "cur:*",
+                "directconnect:*",
+                "ec2:DescribeRegions",
+                "ec2:DescribeTransitGateways",
+                "ec2:DescribeVpnGateways",
+                "fms:*",
+                "globalaccelerator:*",
+                "health:*",
+                "iam:*",
+                "importexport:*",
+                "kms:*",
+                "mobileanalytics:*",
+                "networkmanager:*",
+                "organizations:*",
+                "pricing:*",
+                "route53:*",
+                "route53domains:*",
+                "s3:GetAccountPublic*",
+                "s3:ListAllMyBuckets",
+                "s3:PutAccountPublic*",
+                "shield:*",
+                "sts:*",
+                "support:*",
+                "trustedadvisor:*",
+                "waf-regional:*",
+                "waf:*",
+                "wafv2:*",
+                "wellarchitected:*"
+              ],
+              "Resource": "*",
+              "Effect": "Deny",
+              "Condition": {
+                "StringNotEquals": {
+                  "aws:RequestedRegion": ${AllowedRegions}
+                },
+                "ArnNotEquals": {
+                  "aws:PrincipalArn": "${BypassRoleARN}"
+                }
+              }
+            }
+          ]
+        }
+
+
+
+
+  # Logging Services Protection SCPs
+  ScpCloudTrailProtection:
+    Type: 'AWS::Organizations::Policy'
+    Condition: CreateCloudTrailProtection
+    Properties:
+      Name: scp_cloudtrail
+      Description: "This SCP prevents users or roles in any affected account from disabling CloudTrail logging, either directly as a command or through the console, with an optional bypass role."
+      Type: "SERVICE_CONTROL_POLICY"
+      Content: !Sub |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Deny",
+              "Action": [
+                "cloudtrail:StopLogging",
+                "cloudtrail:DeleteTrail"
+              ],
+              "Resource": "*",
+              "Condition": {
+                "StringNotEqualsIfExists": {
+                  "aws:PrincipalArn": [
+                    "${BypassRoleARN}"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+
+
+  # Network Settings Protection SCPs
+  LockInternetAccessInVPCs:
+    Type: 'AWS::Organizations::Policy'
+    Condition: CreateLockInternetAccessInVPCs
+    Properties:
+      Name: LockInternetAccessInVPCs
+      Description: "Restrict the creation of internet gateways, ensuring VPCs do not have direct internet access."
+      Type: "SERVICE_CONTROL_POLICY"
+      Content: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Deny",
+              "Action": "ec2:CreateInternetGateway",
+              "Resource": "*"
+            },
+            {
+              "Effect": "Deny",
+              "Action": "ec2:AttachInternetGateway",
+              "Resource": "*"
+            }
+          ]
+        }
+
+  # IAM Settings Protection SCPs
+  NoNewIAMUsersOrAccessKeys:
+    Type: 'AWS::Organizations::Policy'
+    Condition: CreateNoNewIAMUsersOrAccessKeys
+    Properties:
+      Name: NoNewIAMUsersOrAccessKeys
+      Description: "Prevent the creation of new IAM users or access keys."
+      Type: "SERVICE_CONTROL_POLICY"
+      Content: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Deny",
+              "Action": [
+                "iam:CreateUser",
+                "iam:CreateAccessKey"
+              ],
+              "Resource": "*"
+            }
+          ]
+        }
+
+  ScpRootAccountRestriction:
+    Type: 'AWS::Organizations::Policy'
+    Condition: CreateRootAccountRestriction
+    Properties:
+      Name: scp_root_account
+      Description: "This SCP restricts the root user in an AWS account from taking any action, either directly as a command or through the console."
+      Type: "SERVICE_CONTROL_POLICY"
+      Content: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": "*",
+              "Resource": "*",
+              "Effect": "Deny",
+              "Condition": {
+                "StringLike": {
+                  "aws:PrincipalArn": ["arn:aws:iam::*:root"]
+                }
+              }
+            }
+          ]
+        }
+
+  ScpAccessAnalyzerProtection:
+    Type: 'AWS::Organizations::Policy'
+    Condition: CreateAccessAnalyzerProtection
+    Properties:
+      Name: scp_accessanalyzer
+      Description: "This SCP prevents users or roles in any affected account from deleting AWS Access Analyzer analyzers in an AWS account."
+      Type: "SERVICE_CONTROL_POLICY"
+      Content: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": ["access-analyzer:DeleteAnalyzer"],
+              "Resource": "*",
+              "Effect": "Deny"
+            }
+          ]
+        }
+
+  ScpEbsDefaultEncryptionEnforcement:
+    Type: 'AWS::Organizations::Policy'
+    Condition: CreateEbsDefaultEncryption
+    Properties:
+      Name: scp_ec2_default_encryption
+      Description: "This SCP prevents users or roles in any affected account from disabling EBS default encryption."
+      Type: "SERVICE_CONTROL_POLICY"
+      Content: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Action": ["ec2:DisableEbsEncryptionByDefault"],
+              "Resource": "*",
+              "Effect": "Deny"
+            }
+          ]
+        }
+
+  # S3 Settings Protection SCPs
+  EnforceEncryptionForS3Buckets:
+    Type: 'AWS::Organizations::Policy'
+    Condition: CreateS3EncryptionEnforcement
+    Properties:
+      Name: EnforceEncryptionForS3Buckets
+      Description: "Require all S3 buckets to have encryption enabled."
+      Type: "SERVICE_CONTROL_POLICY"
+      Content: |
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Deny",
+              "Action": "s3:PutObject",
+              "Resource": "*",
+              "Condition": {
+                "Null": {"s3:x-amz-server-side-encryption": "true"}
+              }
+            }
+          ]
+        }
+
+
+
+Outputs:
+  RestrictAccessToAWSBasedOnRequestedRegionId:
+    Condition: CreateRegionRestriction
+    Description: "ID of the Restrict Access To AWS Based On Requested Region Policy."
+    Value: !Ref RestrictAccessToAWSBasedOnRequestedRegion
+
+  ScpCloudTrailProtectionId:
+    Condition: CreateCloudTrailProtection
+    Description: "ID of the CloudTrail Protection SCP."
+    Value: !Ref ScpCloudTrailProtection
+
+  LockInternetAccessInVPCsId:
+    Condition: CreateLockInternetAccessInVPCs
+    Description: "ID of the Lock Internet Access In VPCs Policy."
+    Value: !Ref LockInternetAccessInVPCs
+
+  NoNewIAMUsersOrAccessKeysId:
+    Condition: CreateNoNewIAMUsersOrAccessKeys
+    Description: "ID of the No New IAM Users Or Access Keys Policy."
+    Value: !Ref NoNewIAMUsersOrAccessKeys
+
+  ScpRootAccountRestrictionId:
+    Condition: CreateRootAccountRestriction
+    Description: "ID of the SCP that restricts the root account."
+    Value: !Ref ScpRootAccountRestriction
+
+  ScpAccessAnalyzerProtectionId:
+    Condition: CreateAccessAnalyzerProtection
+    Description: "ID of the SCP that prevents the deletion of AWS Access Analyzer analyzers."
+    Value: !Ref ScpAccessAnalyzerProtection
+
+  ScpEbsDefaultEncryptionEnforcementId:
+    Condition: CreateEbsDefaultEncryption
+    Description: "ID of the SCP that prevents disabling of EBS default encryption."
+    Value: !Ref ScpEbsDefaultEncryptionEnforcement
+
+  EnforceEncryptionForS3BucketsId:
+    Condition: CreateS3EncryptionEnforcement
+    Description: "ID of the SCP that enforces encryption for S3 buckets."
+    Value: !Ref EnforceEncryptionForS3Buckets
