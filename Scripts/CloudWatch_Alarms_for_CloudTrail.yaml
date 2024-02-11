@@ -1,8 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-This CloudFormation template deploys critical CloudWatch Alarms for AWS CloudTrail API activities, aligned with CIS AWS Foundations Benchmarks. 
-It offers real-time monitoring and notifications for security-related events, including unauthorized API calls and sign-in activities. 
-Customizable settings allow for tailored alarm activation to suit specific security and compliance needs.
+  This CloudFormation template deploys critical CloudWatch Alarms for AWS CloudTrail API activities, aligned with CIS AWS Foundations Benchmarks. 
+  It offers real-time monitoring and notifications for security-related events, including unauthorized API calls and sign-in activities. 
+  Customizable settings allow for tailored alarm activation to suit specific security and compliance needs.
 
 Parameters: 
   LogGroupName: 
