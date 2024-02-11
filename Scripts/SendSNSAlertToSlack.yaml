@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS CloudFormation template to forward SNS messages to Slack via Lambda using urllib.'
+
+Parameters:
+  SnsTopicArn:
+    Type: String
+    Description: The ARN of the SNS topic to subscribe to.
+    
+  SlackWebhookUrl:
+    Type: String
+    Description: The Slack webhook URL to send notifications to.
+
+Resources:
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: LambdaExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: 'arn:aws:logs:*:*:*'
+              - Effect: Allow
+                Action: 'sns:Publish'
+                Resource: !Ref SnsTopicArn
+
+  NotificationLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Runtime: python3.8
+      Code:
+        ZipFile: |
+          import json
+          import os
+          from urllib.request import Request, urlopen
+          from urllib.error import URLError, HTTPError
+          
+          def format_message(alarm_message):
+              """
+              Formats the alarm message to a more readable format.
+              """
+              # Parse the JSON message
+              alarm_data = json.loads(alarm_message)
+              
+              # Extract and format the desired fields
+              formatted_message = (
+                  f"AWS Account ID: {alarm_data.get('AWSAccountId')}\n"
+                  f"Region: {alarm_data.get('Region')}\n"
+                  f"Alarm Name: {alarm_data.get('AlarmName')}\n"
+                  f"Alarm Description: {alarm_data.get('AlarmDescription')}\n"
+                  f"New State: {alarm_data.get('NewStateValue')}\n"
+                  f"Reason: {alarm_data.get('NewStateReason')}"
+              )
+              return formatted_message
+          
+          def lambda_handler(event, context):
+              # Extract the message from the SNS event
+              sns_message = event['Records'][0]['Sns']['Message']
+              
+              # Format the message to a more readable format
+              slack_message_text = format_message(sns_message)
+              
+              # Prepare the Slack message payload
+              slack_message = {
+                  'text': slack_message_text
+              }
+              slack_webhook_url = os.environ['SLACK_WEBHOOK_URL']
+              req = Request(slack_webhook_url, json.dumps(slack_message).encode('utf-8'), headers={'Content-Type': 'application/json'})
+              try:
+                  response = urlopen(req)
+                  response.read()
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps('Message sent to Slack successfully!')
+                  }
+              except HTTPError as e:
+                  return {
+                      'statusCode': e.code,
+                      'body': json.dumps('Request failed: ' + str(e.reason))
+                  }
+              except URLError as e:
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps('Server connection failed: ' + str(e.reason))
+                  }
+      Environment:
+        Variables:
+          SLACK_WEBHOOK_URL: !Ref SlackWebhookUrl
+
+
+  LambdaPermissionForSNS:
+    Type: 'AWS::Lambda::Permission'
+    Properties:
+      FunctionName: !Ref NotificationLambdaFunction
+      Action: 'lambda:InvokeFunction'
+      Principal: 'sns.amazonaws.com'
+      SourceArn: !Ref SnsTopicArn
+
+  SNSSubscription:
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      Protocol: 'lambda'
+      Endpoint: !GetAtt NotificationLambdaFunction.Arn
+      TopicArn: !Ref SnsTopicArn
+
+Outputs:
+  LambdaFunctionName:
+    Description: 'The name of the Lambda function'
+    Value: !Ref NotificationLambdaFunction
