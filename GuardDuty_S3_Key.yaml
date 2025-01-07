@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: CloudFormation template to create a multi-region KMS key, key alias, S3 bucket, and bucket policy with GuardDuty-specific configurations.
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Description: Name of the S3 bucket to be created.
+    AllowedPattern: ^[a-z0-9-]*$
+    ConstraintDescription: Bucket name must only contain lowercase letters, numbers, and hyphens.
+  GuarddutySourceAwsAccount:
+    Type: String
+    Description: The AWS account ID for the GuardDuty source.
+    AllowedPattern: ^[0-9]{12}$
+    ConstraintDescription: Must be a valid 12-digit AWS account number.
+
+Resources:
+  KmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: Multi-Region Key for encrypting GuardDuty findings
+      MultiRegion: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+          - Effect: Allow
+            Principal:
+              Service: 
+                - guardduty.amazonaws.com
+                - !Sub "guardduty.${AWS::Region}.amazonaws.com"
+            Action:
+              - "kms:GenerateDataKey"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref GuarddutySourceAwsAccount
+
+  KmsKeyAlias:
+    Type: AWS::KMS::Alias
+    DependsOn: KmsKey
+    Properties:
+      AliasName: !Sub "alias/GuardDutyKey"
+      TargetKeyId: !Ref KmsKey
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${S3BucketName}-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    DependsOn: S3Bucket
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyNonHttpsAccess
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource: 
+              - !Sub "arn:aws:s3:::${S3BucketName}-${AWS::AccountId}"
+              - !Sub "arn:aws:s3:::${S3BucketName}-${AWS::AccountId}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: AllowPutObject
+            Effect: Allow
+            Principal:
+              Service: 
+                - guardduty.amazonaws.com
+                - !Sub "guardduty.${AWS::Region}.amazonaws.com"
+            Action:
+              - s3:PutObject
+              - s3:GetBucketLocation
+            Resource: 
+              - !Sub "arn:aws:s3:::${S3BucketName}-${AWS::AccountId}"
+              - !Sub "arn:aws:s3:::${S3BucketName}-${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref GuarddutySourceAwsAccount
+
+Outputs:
+  S3BucketNameOutput:
+    Description: Name of the S3 bucket
+    Value: !Ref S3Bucket
+
+  S3BucketArnOutput:
+    Description: ARN of the S3 bucket
+    Value: !Sub "arn:aws:s3:::${S3BucketName}-${AWS::AccountId}"
+
+  KmsKeyArnOutput:
+    Description: ARN of the KMS key
+    Value: !Sub "arn:aws:kms:${AWS::Region}:${AWS::AccountId}:key/${KmsKey}"
